@@ -21,11 +21,16 @@
     <main class="main"><div class="wrap">
       <section id="loginPanel" class="login">
         <p class="eyebrow">Panel privado</p><h1>Acceso administrativo.</h1>
-        <p class="intro">Ingresa tu correo autorizado. Recibirás un enlace seguro para acceder, sin necesidad de recordar una contraseña.</p>
+        <p class="intro">Ingresa tu correo autorizado. Recibirás un código de acceso de un solo uso, sin necesidad de recordar una contraseña.</p>
         <form id="loginForm">
           <div class="field"><label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="email" required placeholder="nombre@empresa.com"></div>
-          <button class="btn btn-primary" type="submit">Enviar enlace de acceso</button>
+          <button class="btn btn-primary" type="submit">Enviar código de acceso</button>
           <p id="loginStatus" class="status" role="status"></p>
+        </form>
+        <form id="codeForm" class="hidden">
+          <div class="field"><label for="code">Código recibido</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required maxlength="8" placeholder="000000"></div>
+          <button class="btn btn-primary" type="submit">Ingresar al panel</button>
+          <p id="codeStatus" class="status" role="status"></p>
         </form>
         <p class="note">El acceso está restringido a administradores autorizados de Gambin Partners.</p>
       </section>
@@ -49,11 +54,12 @@
     const escapeHtml=value=>String(value??'—').replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[char]));
     const formatDate=value=>new Intl.DateTimeFormat('es-PE',{dateStyle:'medium',timeStyle:'short',timeZone:'America/Lima'}).format(new Date(value));
 
-    function getToken(){const hash=new URLSearchParams(location.hash.slice(1));const incoming=hash.get('access_token');if(incoming){sessionStorage.setItem(tokenKey,incoming);history.replaceState(null,'',location.pathname)}return incoming||sessionStorage.getItem(tokenKey)}
+    function getToken(){const hash=new URLSearchParams(location.hash.slice(1));const incoming=hash.get('access_token');if(incoming){sessionStorage.setItem(tokenKey,incoming)}if(location.hash)history.replaceState(null,'',location.pathname);return incoming||sessionStorage.getItem(tokenKey)}
     function setStatus(id,message,type=''){const el=$(id);el.textContent=message;el.className=`status ${type}`}
     async function request(path,options={}){const response=await fetch(`${SUPABASE_URL}${path}`,options);const data=response.status===204?null:await response.json().catch(()=>null);if(!response.ok)throw new Error(data?.msg||data?.message||data?.error_description||'No se pudo completar la operación.');return data}
 
-    $('loginForm').addEventListener('submit',async event=>{event.preventDefault();const email=$('email').value.trim().toLowerCase();if(email!==ADMIN_EMAIL){setStatus('loginStatus','Este correo no está autorizado.','error');return}const button=event.currentTarget.querySelector('button');button.disabled=true;setStatus('loginStatus','Enviando enlace seguro…');try{await request('/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,options:{emailRedirectTo:`${location.origin}/admin`,shouldCreateUser:true}})});setStatus('loginStatus','Revisa tu correo. El enlace de acceso estará disponible durante unos minutos.','success')}catch(error){setStatus('loginStatus',error.message,'error')}finally{button.disabled=false}});
+    $('loginForm').addEventListener('submit',async event=>{event.preventDefault();const email=$('email').value.trim().toLowerCase();if(email!==ADMIN_EMAIL){setStatus('loginStatus','Este correo no está autorizado.','error');return}const button=event.currentTarget.querySelector('button');button.disabled=true;setStatus('loginStatus','Enviando código seguro…');try{await request('/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,options:{shouldCreateUser:true}})});$('codeForm').classList.remove('hidden');$('code').focus();setStatus('loginStatus','Revisa tu correo e ingresa el código recibido.','success')}catch(error){setStatus('loginStatus',error.message,'error')}finally{button.disabled=false}});
+    $('codeForm').addEventListener('submit',async event=>{event.preventDefault();const email=$('email').value.trim().toLowerCase(),token=$('code').value.trim();const button=event.currentTarget.querySelector('button');button.disabled=true;setStatus('codeStatus','Verificando código…');try{const session=await request('/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,token,type:'email'})});sessionStorage.setItem(tokenKey,session.access_token);setStatus('codeStatus','Acceso confirmado.','success');await authenticate()}catch(error){setStatus('codeStatus',error.message,'error')}finally{button.disabled=false}});
 
     async function authenticate(){const token=getToken();if(!token)return;try{const user=await request('/auth/v1/user',{headers:headers(token)});if(user.email?.toLowerCase()!==ADMIN_EMAIL)throw new Error('Tu cuenta no tiene autorización para este panel.');$('loginPanel').classList.add('hidden');$('dashboard').classList.remove('hidden');$('logout').classList.remove('hidden');$('welcome').textContent=`Sesión iniciada como ${user.email}`;await loadContacts(token)}catch(error){sessionStorage.removeItem(tokenKey);setStatus('loginStatus',error.message,'error')}}
     async function loadContacts(token=getToken()){try{const query='/rest/v1/contact_submissions?select=id,created_at,nombre,empresa,cargo,correo,telefono,pais,tema,mensaje,estado&order=created_at.desc';records=await request(query,{headers:headers(token)});render()}catch(error){$('loading').classList.add('hidden');setStatus('panelStatus',error.message,'error')}}
