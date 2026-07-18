@@ -76,21 +76,26 @@ export default async function handler(request, response) {
   }
 
   const databaseResponse = await fetch(
-    `${SUPABASE_URL}/rest/v1/contact_submissions?on_conflict=request_id`,
+    `${SUPABASE_URL}/rest/v1/contact_submissions`,
     {
       method: "POST",
       headers: {
         apikey: SUPABASE_PUBLISHABLE_KEY,
         "Content-Type": "application/json",
-        Prefer: "resolution=ignore-duplicates,return=minimal",
+        Prefer: "return=minimal",
       },
       body: JSON.stringify(payload),
     },
   );
 
   if (!databaseResponse.ok) {
-    console.error("Supabase insert failed", databaseResponse.status, await databaseResponse.text());
-    return response.status(502).json({ error: "No pudimos guardar la consulta." });
+    const databaseError = await databaseResponse.json().catch(() => ({}));
+    const isDuplicateRequest = databaseResponse.status === 409 && databaseError.code === "23505";
+
+    if (!isDuplicateRequest) {
+      console.error("Supabase insert failed", databaseResponse.status, databaseError);
+      return response.status(502).json({ error: "No pudimos guardar la consulta." });
+    }
   }
 
   const safe = Object.fromEntries(
